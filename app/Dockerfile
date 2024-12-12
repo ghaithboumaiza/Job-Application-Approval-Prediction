@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application files into the container
 COPY . .
 
-# Set Google Cloud credentials environment variable (key injected at runtime)
+# Ensure the GOOGLE_APPLICATION_CREDENTIALS environment variable is passed
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-key.json
 
 # Expose the default Gradio port

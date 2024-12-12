@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-deploy:
-    name: Build and Deploy Job Application Pipeline
+    name: Build and Deploy Job Application Prediction Pipeline
     runs-on: ubuntu-latest
 
     steps:
@@ -22,8 +22,8 @@ jobs:
 
     - name: Authenticate Service Account
       run: |
-        echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" | base64 --decode > /tmp/key.json
-        gcloud auth activate-service-account --key-file=/tmp/key.json
+        echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" | base64 --decode > /tmp/gcs-key.json
+        gcloud auth activate-service-account --key-file=/tmp/gcs-key.json
 
     - name: Configure GCP Project and Region
       run: |
@@ -36,12 +36,8 @@ jobs:
           artifactregistry.googleapis.com \
           run.googleapis.com \
           cloudresourcemanager.googleapis.com \
-          iam.googleapis.com
-
-    - name: Fetch Latest Dataset
-      run: |
-        mkdir -p data/raw
-        gsutil cp gs://jobapplicationprediction/data/raw/job_applications.csv data/raw/job_applications.csv
+          iam.googleapis.com \
+          storage.googleapis.com
 
     - name: Build Pipeline Docker Image
       run: |
@@ -58,7 +54,9 @@ jobs:
           --image us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/pipeline:${{ github.sha }} \
           --region us-central1 \
           --platform managed \
-          --allow-unauthenticated
+          --allow-unauthenticated \
+          --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-key.json \
+          --service-account=397631499407-compute@developer.gserviceaccount.com
 
     - name: Build Gradio Docker Image
       run: |
@@ -66,7 +64,6 @@ jobs:
 
     - name: Push Gradio Docker Image to Artifact Registry
       run: |
-        gcloud auth configure-docker us-central1-docker.pkg.dev
         docker push us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/gradio:${{ github.sha }}
 
     - name: Deploy Gradio to Google Cloud Run
@@ -75,4 +72,6 @@ jobs:
           --image us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/gradio:${{ github.sha }} \
           --region us-central1 \
           --platform managed \
-          --allow-unauthenticated
+          --allow-unauthenticated \
+          --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-key.json \
+          --service-account=397631499407-compute@developer.gserviceaccount.com

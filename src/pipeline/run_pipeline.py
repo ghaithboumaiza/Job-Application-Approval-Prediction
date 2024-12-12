@@ -8,9 +8,7 @@ from src.models.train import train_model
 from src.models.tune_hyperparams import tune_random_forest
 from src.models.evaluate import evaluate_and_save
 from google.cloud import storage
-from src.models.evaluate import evaluate_and_save
 from sklearn.model_selection import train_test_split
-
 
 def upload_directory_to_gcs(local_dir, bucket_name, gcs_dir):
     client = storage.Client()
@@ -41,14 +39,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"OK")
-
+        self.wfile.write(b"Service is running")
 
 def start_http_server():
     """Start a simple HTTP server for health checks."""
     port = int(os.getenv("PORT", 8080))  # Default Cloud Run port is 8080
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     print(f"Starting HTTP server on port {port}...")
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
 def verify_processed_data(processed_data_path):
@@ -77,15 +74,11 @@ def run_pipeline():
 
     # Hyperparameter tuning
     print("Step 3: Hyperparameter tuning...")
-    #best_xgb = tune_xgboost(X_train, y_train)
-    #best_catboost = tune_catboost(X_train, y_train)
     best_rf = tune_random_forest(X_train, y_train)
 
     # Evaluate the best models
     print("Step 4: Evaluating the best models...")
     models = {
-        #"XGBoost": best_xgb,
-        #"CatBoost": best_catboost,
         "Random Forest": best_rf,
     }
     best_model_name, best_model = evaluate_and_save(
@@ -100,6 +93,14 @@ def run_pipeline():
 
     print(f"Pipeline completed successfully! Best Model: {best_model_name}")
 
-
 if __name__ == "__main__":
+    # Start the HTTP server in a separate thread
+    server_thread = threading.Thread(target=start_http_server, daemon=True)
+    server_thread.start()
+
+    # Run the pipeline logic
     run_pipeline()
+
+    # Keep the main thread alive to ensure the server stays running
+    while True:
+        time.sleep(60)

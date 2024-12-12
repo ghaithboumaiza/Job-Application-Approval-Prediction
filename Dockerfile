@@ -20,8 +20,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the project files into the container
-COPY . .
+
+# Copy all project files into the container
+COPY . /app
 
 # Set Google Cloud credentials environment variable (key injected at runtime)
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-key.json
