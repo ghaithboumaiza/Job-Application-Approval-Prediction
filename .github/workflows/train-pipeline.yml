@@ -1,0 +1,61 @@
+name: CI/CD for Loan Approval Training Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Training Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up Docker
+      uses: docker/setup-buildx-action@v2
+
+    - name: Install jq (JSON Validator)
+      run: sudo apt-get update && sudo apt-get install -y jq
+
+    - name: Authenticate Service Account
+      run: |
+        echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" | base64 --decode > /tmp/key.json
+        gcloud auth activate-service-account --key-file=/tmp/key.json
+
+    - name: Configure GCP Project and Region
+      run: |
+        gcloud config set project ${{ secrets.GCP_PROJECT }}
+        gcloud config set run/region us-central1
+
+    - name: Enable Required Google Cloud APIs
+      run: |
+        gcloud services enable \
+          artifactregistry.googleapis.com \
+          run.googleapis.com \
+          cloudresourcemanager.googleapis.com \
+          iam.googleapis.com
+
+    - name: Fetch Latest Dataset
+      run: |
+        mkdir -p data/raw
+        gsutil cp gs://loanapprovalprediction/data/raw/LoanApprovalPrediction.csv data/raw/LoanApprovalPrediction.csv
+
+    - name: Build Docker Image
+      run: |
+        docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/loan-approval-repo/loan-approval-pipeline:${{ github.sha }} .
+
+    - name: Push Docker Image to Artifact Registry
+      run: |
+        gcloud auth configure-docker us-central1-docker.pkg.dev
+        docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/loan-approval-repo/loan-approval-pipeline:${{ github.sha }}
+
+    - name: Deploy to Google Cloud Run
+      run: |
+        gcloud run deploy loan-approval-pipeline \
+          --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/loan-approval-repo/loan-approval-pipeline:${{ github.sha }} \
+          --region us-central1 \
+          --platform managed \
+          --allow-unauthenticated
