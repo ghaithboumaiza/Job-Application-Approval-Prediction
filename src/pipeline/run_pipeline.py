@@ -2,11 +2,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 import time
 import os
+import pandas as pd
 from src.data.preprocess import preprocess_data
 from src.models.train import train_model
-from src.models.tune_hyperparams import tune_xgboost, tune_catboost, tune_random_forest
+from src.models.tune_hyperparams import tune_random_forest
 from src.models.evaluate import evaluate_and_save
 from google.cloud import storage
+from src.models.evaluate import evaluate_and_save
+from sklearn.model_selection import train_test_split
+
 
 def upload_directory_to_gcs(local_dir, bucket_name, gcs_dir):
     client = storage.Client()
@@ -20,6 +24,17 @@ def upload_directory_to_gcs(local_dir, bucket_name, gcs_dir):
             blob.upload_from_filename(local_path)
             print(f"Uploaded {local_path} to gs://{bucket_name}/{gcs_path}")
 
+def verify_gcs_dataset(bucket_name, blob_name, local_path="/tmp/temp_dataset.csv"):
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.download_to_filename(local_path)
+    print(f"Downloaded dataset from GCS to {local_path}")
+
+    # Load and verify dataset contents
+    data = pd.read_csv(local_path)
+    print("Columns in the downloaded dataset:", data.columns.tolist())
+    return data
 
 # Dummy HTTP server to satisfy Cloud Run's port requirement
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -36,65 +51,55 @@ def start_http_server():
     print(f"Starting HTTP server on port {port}...")
     server.serve_forever()
 
+def verify_processed_data(processed_data_path):
+    data = pd.read_csv(processed_data_path)
+    print("Columns in the processed dataset:", data.columns.tolist())
+    print("Sample rows from the processed dataset:")
+    print(data.head())
 
 def run_pipeline():
     """Main logic for running the ML pipeline."""
-    # Paths
-    raw_data_path = "gs://loanapprovalprediction/data/raw/LoanApprovalPrediction.csv"
-    processed_data_path = "/tmp/processed_data.csv"  # Temp location in the container
-    model_dir = "models/"  # Local directory for saving models
-    gcs_bucket_name = "loanapprovalprediction"  # Your GCS bucket
-    gcs_model_path = "models/best_model.pkl"  # Path in GCS for the best model
-    gcs_metrics_path = "metrics/best_model_metrics.json"  # Path in GCS for model metrics
-
-    # Step 1: Preprocessing
-    print("Step 1: Preprocessing data...")
+    # Paths and configurations
+    raw_data_path = "gs://jobapplicationprediction/data/raw/stackoverflow_full.csv"
     encoder_dir = "encoders/"
-    scaler_dir = "scaler/"
-    preprocess_data(raw_data_path, processed_data_path, encoder_dir, scaler_dir)
+    model_dir = "models/"
+    gcs_bucket_name = "jobapplicationprediction"
+    gcs_model_path = "models/best_model.pkl"
+    gcs_metrics_path = "metrics/best_model_metrics.json"
 
-    upload_directory_to_gcs(encoder_dir, gcs_bucket_name, 'encoders/')
-    upload_directory_to_gcs(scaler_dir, gcs_bucket_name, 'scaler/')
-    
-    # Load data
-    from src.models.tune_hyperparams import load_data
-    X_train, X_test, y_train, y_test = load_data(processed_data_path)
+    # Preprocess data
+    print("Step 1: Preprocessing data...")
+    X, y = preprocess_data(raw_data_path, encoder_dir, gcs_bucket_name)
 
-    # Step 2: Hyperparameter tuning
-    print("Step 2: Hyperparameter tuning for XGBoost...")
-    best_xgb = tune_xgboost(X_train, y_train)
+    # Split data into train and test
+    print("Step 2: Splitting data into train and test sets...")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
 
-    print("Step 3: Hyperparameter tuning for CatBoost...")
-    best_catboost = tune_catboost(X_train, y_train)
-
-    print("Step 4: Hyperparameter tuning for Random Forest...")
+    # Hyperparameter tuning
+    print("Step 3: Hyperparameter tuning...")
+    #best_xgb = tune_xgboost(X_train, y_train)
+    #best_catboost = tune_catboost(X_train, y_train)
     best_rf = tune_random_forest(X_train, y_train)
 
-    # Step 5: Evaluate and save the best model
+    # Evaluate the best models
+    print("Step 4: Evaluating the best models...")
     models = {
-        "XGBoost": best_xgb,
-        "CatBoost": best_catboost,
+        #"XGBoost": best_xgb,
+        #"CatBoost": best_catboost,
         "Random Forest": best_rf,
     }
-    print("Step 5: Evaluating models and saving the best one...")
     best_model_name, best_model = evaluate_and_save(
-        models, 
-        X_test, 
-        y_test, 
-        model_dir, 
-        gcs_bucket_name, 
-        gcs_model_path, 
-        gcs_metrics_path
+        models,
+        X_test,
+        y_test,
+        model_dir,
+        gcs_bucket_name,
+        gcs_model_path,
+        gcs_metrics_path,
     )
 
     print(f"Pipeline completed successfully! Best Model: {best_model_name}")
 
 
 if __name__ == "__main__":
-    # Start the HTTP server in a separate thread
-    server_thread = threading.Thread(target=start_http_server)
-    server_thread.daemon = True
-    server_thread.start()
-
-    # Run the ML pipeline
     run_pipeline()

@@ -1,29 +1,34 @@
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, roc_auc_score
+import joblib
+import os 
+from google.cloud import storage
 
-def train_model(input_path, model_path):
-    # Load the processed dataset
-    data = pd.read_csv(input_path)
+def upload_to_gcs(local_file_path, bucket_name, destination_blob_name):
+    """Upload a local file to GCS."""
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+    blob.upload_from_filename(local_file_path)
+    print(f"Uploaded {local_file_path} to gs://{bucket_name}/{destination_blob_name}")
 
-    # Split into features and target
-    X = data.drop('Loan_Status', axis=1)
-    y = data['Loan_Status']
-
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Train Logistic Regression model
-    model = LogisticRegression()
+def train_model(X_train, y_train, model_dir="models/", gcs_bucket_name=None, gcs_model_path=None):
+    """
+    Train the Random Forest model and save it locally and to GCS.
+    """
+    # Train the model
+    print("Training Random Forest model...")
+    model = RandomForestClassifier()
     model.fit(X_train, y_train)
 
-    # Evaluate the model
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"Model Accuracy: {acc * 100:.2f}%")
-
     # Save the model
-    import joblib
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, "random_forest_model.pkl")
     joblib.dump(model, model_path)
-    print(f"Model saved to {model_path}")
+    print(f"Model saved locally at {model_path}")
+
+    # Upload model to GCS
+    if gcs_bucket_name and gcs_model_path:
+        upload_to_gcs(model_path, gcs_bucket_name, gcs_model_path)
+
+    return model

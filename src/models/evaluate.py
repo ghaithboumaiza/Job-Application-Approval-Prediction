@@ -5,14 +5,14 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from google.cloud import storage
 
 
-def upload_to_gcs(local_file_path, bucket_name, destination_blob_name):
-    """Upload a local file to GCS."""
+def upload_to_gcs(local_file_path, bucket_name, destination_blob_name, timeout=600):
+    """Upload a local file to GCS with an extended timeout."""
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
-    blob.upload_from_filename(local_file_path)
+    print(f"Uploading {local_file_path} to gs://{bucket_name}/{destination_blob_name} with timeout={timeout} seconds...")
+    blob.upload_from_filename(local_file_path, timeout=timeout)
     print(f"Uploaded {local_file_path} to gs://{bucket_name}/{destination_blob_name}")
-
 
 def evaluate_and_save(models, X_test, y_test, model_dir="models/", gcs_bucket_name=None, gcs_model_path=None, gcs_metrics_path=None):
     """

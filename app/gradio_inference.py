@@ -6,20 +6,19 @@ from google.cloud import storage
 import csv
 
 # Configuration
-GCS_BUCKET_NAME = "jobapplicationprediction"  # Update for the new project
+GCS_BUCKET_NAME = "jobapplicationprediction"  # Update for the project
 BEST_MODEL_PATH = "models/best_model.pkl"     # Path to the model in GCS
 GCS_ENCODER_DIR = "encoders/"                # Path in GCS for encoders
-GCS_SCALER_PATH = "scaler/scaler.pkl"        # Path in GCS for scaler
-SAVED_INFERENCES_PATH = "/tmp/saved_inferences.csv"  # Local path to save inferences
 GCS_SAVED_INFERENCES_PATH = "feedback/saved_inferences.csv"  # Path in GCS for saved inferences
+SAVED_INFERENCES_PATH = "/tmp/saved_inferences.csv"          # Local path to save inferences
 LOCAL_MODEL_PATH = "/tmp/best_model.pkl"     # Local path for the model
 LOCAL_ENCODER_DIR = "/tmp/encoders/"         # Local directory for encoders
-LOCAL_SCALER_PATH = "/tmp/scaler.pkl"        # Local path for scaler
 
 # Ensure the saved inferences file exists
 if not os.path.exists(SAVED_INFERENCES_PATH):
     pd.DataFrame(columns=[
-        "Education", "Experience", "Referred", "Applied_Previously", "Skill_Score", "Prediction"
+        "HaveWorkedWith", "Age", "Accessibility", "EdLevel", "Gender", 
+        "MentalHealth", "MainBranch", "Country", "Prediction"
     ]).to_csv(SAVED_INFERENCES_PATH, index=False)
 
 def save_inference(data, prediction):
@@ -27,7 +26,8 @@ def save_inference(data, prediction):
     Save inference data and prediction to a CSV file.
     """
     header = [
-        "Education", "Experience", "Referred", "Applied_Previously", "Skill_Score", "Prediction"
+        "HaveWorkedWith", "Age", "Accessibility", "EdLevel", "Gender",
+        "MentalHealth", "MainBranch", "Country", "Prediction"
     ]
     file_exists = os.path.isfile(SAVED_INFERENCES_PATH)
     with open(SAVED_INFERENCES_PATH, mode="a", newline="") as file:
@@ -73,7 +73,7 @@ def download_directory_from_gcs(bucket_name, gcs_dir, local_dir):
 
 def load_resources():
     """
-    Download and load the model, encoders, and scaler from GCS.
+    Download and load the model and encoders from GCS.
     """
     download_from_gcs(GCS_BUCKET_NAME, BEST_MODEL_PATH, LOCAL_MODEL_PATH)
     model = joblib.load(LOCAL_MODEL_PATH)
@@ -81,42 +81,47 @@ def load_resources():
 
     download_directory_from_gcs(GCS_BUCKET_NAME, GCS_ENCODER_DIR, LOCAL_ENCODER_DIR)
     encoders = {}
-    for col in ['Education', 'Referred', 'Applied_Previously']:
-        encoder_path = os.path.join(LOCAL_ENCODER_DIR, f"{col}_encoder.pkl")
-        encoders[col] = joblib.load(encoder_path)
+    vectorizer_path = os.path.join(LOCAL_ENCODER_DIR, "vectorizer.pkl")
+    vectorizer = joblib.load(vectorizer_path)
+    encoders["HaveWorkedWith"] = vectorizer
+
+    one_hot_encoder_path = os.path.join(LOCAL_ENCODER_DIR, "one_hot_encoder.pkl")
+    one_hot_encoder = joblib.load(one_hot_encoder_path)
+    encoders["categorical"] = one_hot_encoder
+
     print("Encoders loaded.")
+    return model, encoders
 
-    download_from_gcs(GCS_BUCKET_NAME, GCS_SCALER_PATH, LOCAL_SCALER_PATH)
-    scaler = joblib.load(LOCAL_SCALER_PATH)
-    print("Scaler loaded.")
-
-    return model, encoders, scaler
-
-def predict(Education, Experience, Referred, Applied_Previously, Skill_Score):
+def predict(HaveWorkedWith, Age, Accessibility, EdLevel, Gender, MentalHealth, MainBranch, Country):
     """
     Perform prediction on user input.
     """
-    model, encoders, scaler = load_resources()
+    model, encoders = load_resources()
 
     input_data = pd.DataFrame(
-        [[Education, Experience, Referred, Applied_Previously, Skill_Score]],
-        columns=["Education", "Experience", "Referred", "Applied_Previously", "Skill_Score"],
+        [[HaveWorkedWith, Age, Accessibility, EdLevel, Gender, MentalHealth, MainBranch, Country]],
+        columns=["HaveWorkedWith", "Age", "Accessibility", "EdLevel", "Gender", "MentalHealth", "MainBranch", "Country"],
     )
 
-    # Apply encoders
-    categorical_cols = ["Education", "Referred", "Applied_Previously"]
-    for col in categorical_cols:
-        encoder = encoders[col]
-        input_data[col] = encoder.transform([input_data[col][0]])
+    # Apply text vectorizer for "HaveWorkedWith"
+    vectorizer = encoders["HaveWorkedWith"]
+    text_vectorized = vectorizer.transform(input_data["HaveWorkedWith"])
 
-    # Convert numerical inputs to float and scale them
-    input_data[["Experience", "Skill_Score"]] = scaler.transform(input_data[["Experience", "Skill_Score"]])
+    # Apply one-hot encoder for categorical features
+    one_hot_encoder = encoders["categorical"]
+    categorical_data = one_hot_encoder.transform(input_data[["Age", "Accessibility", "EdLevel", "Gender", "MentalHealth", "MainBranch", "Country"]])
+
+    # Combine processed data
+    combined_data = pd.concat([pd.DataFrame(text_vectorized.toarray()), pd.DataFrame(categorical_data.toarray())], axis=1)
 
     # Perform prediction
-    prediction = model.predict(input_data)
+    prediction = model.predict(combined_data)
     result = "Approved" if prediction[0] == 1 else "Not Approved"
 
-    save_inference([Education, Experience, Referred, Applied_Previously, Skill_Score], result)
+    save_inference(
+        [HaveWorkedWith, Age, Accessibility, EdLevel, Gender, MentalHealth, MainBranch, Country],
+        result,
+    )
 
     return result
 
@@ -125,16 +130,11 @@ def feedback():
     Display and allow modification of saved inferences.
     """
     if os.path.exists(SAVED_INFERENCES_PATH):
-        try:
-            saved_data = pd.read_csv(SAVED_INFERENCES_PATH)
-        except pd.errors.ParserError:
-            saved_data = pd.DataFrame(columns=[
-                "Education", "Experience", "Referred", "Applied_Previously", "Skill_Score", "Prediction"
-            ])
-            saved_data.to_csv(SAVED_INFERENCES_PATH, index=False)
+        saved_data = pd.read_csv(SAVED_INFERENCES_PATH)
     else:
         saved_data = pd.DataFrame(columns=[
-            "Education", "Experience", "Referred", "Applied_Previously", "Skill_Score", "Prediction"
+            "HaveWorkedWith", "Age", "Accessibility", "EdLevel", "Gender", 
+            "MentalHealth", "MainBranch", "Country", "Prediction"
         ])
         saved_data.to_csv(SAVED_INFERENCES_PATH, index=False)
 
@@ -155,11 +155,14 @@ if __name__ == "__main__":
     predict_tab = gr.Interface(
         fn=predict,
         inputs=[
-            gr.Dropdown(["Yes", "No"], label="Education"),
-            gr.Number(label="Experience"),
-            gr.Dropdown(["Yes", "No"], label="Referred"),
-            gr.Dropdown(["Yes", "No"], label="Applied Previously"),
-            gr.Number(label="Skill Score"),
+            gr.Textbox(label="HaveWorkedWith"),
+            gr.Dropdown(["Low", "Medium", "High"], label="Age"),
+            gr.Dropdown(["Yes", "No"], label="Accessibility"),
+            gr.Dropdown(["High School", "Bachelor's", "Master's", "PhD"], label="EdLevel"),
+            gr.Dropdown(["Male", "Female", "Other"], label="Gender"),
+            gr.Dropdown(["Yes", "No"], label="MentalHealth"),
+            gr.Dropdown(["Software Development", "Data Science", "Other"], label="MainBranch"),
+            gr.Textbox(label="Country"),
         ],
         outputs="text",
         title="Job Application Approval Prediction",

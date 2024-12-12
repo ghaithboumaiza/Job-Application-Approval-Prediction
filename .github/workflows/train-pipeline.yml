@@ -1,4 +1,4 @@
-name: CI/CD for Loan Approval Training Pipeline
+name: CI/CD for Job Application Prediction Pipeline
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-deploy:
-    name: Build and Deploy Training Pipeline
+    name: Build and Deploy Job Application Pipeline
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +27,7 @@ jobs:
 
     - name: Configure GCP Project and Region
       run: |
-        gcloud config set project ${{ secrets.GCP_PROJECT }}
+        gcloud config set project smart-cove-444508-k0
         gcloud config set run/region us-central1
 
     - name: Enable Required Google Cloud APIs
@@ -41,21 +41,38 @@ jobs:
     - name: Fetch Latest Dataset
       run: |
         mkdir -p data/raw
-        gsutil cp gs://loanapprovalprediction/data/raw/LoanApprovalPrediction.csv data/raw/LoanApprovalPrediction.csv
+        gsutil cp gs://jobapplicationprediction/data/raw/job_applications.csv data/raw/job_applications.csv
 
-    - name: Build Docker Image
+    - name: Build Pipeline Docker Image
       run: |
-        docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/loan-approval-repo/loan-approval-pipeline:${{ github.sha }} .
+        docker build -t us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/pipeline:${{ github.sha }} .
 
-    - name: Push Docker Image to Artifact Registry
+    - name: Push Pipeline Docker Image to Artifact Registry
       run: |
         gcloud auth configure-docker us-central1-docker.pkg.dev
-        docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/loan-approval-repo/loan-approval-pipeline:${{ github.sha }}
+        docker push us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/pipeline:${{ github.sha }}
 
-    - name: Deploy to Google Cloud Run
+    - name: Deploy Pipeline to Google Cloud Run
       run: |
-        gcloud run deploy loan-approval-pipeline \
-          --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/loan-approval-repo/loan-approval-pipeline:${{ github.sha }} \
+        gcloud run deploy job-app-pipeline \
+          --image us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/pipeline:${{ github.sha }} \
+          --region us-central1 \
+          --platform managed \
+          --allow-unauthenticated
+
+    - name: Build Gradio Docker Image
+      run: |
+        docker build -t us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/gradio:${{ github.sha }} .
+
+    - name: Push Gradio Docker Image to Artifact Registry
+      run: |
+        gcloud auth configure-docker us-central1-docker.pkg.dev
+        docker push us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/gradio:${{ github.sha }}
+
+    - name: Deploy Gradio to Google Cloud Run
+      run: |
+        gcloud run deploy job-app-gradio \
+          --image us-central1-docker.pkg.dev/smart-cove-444508-k0/job-app-repo/gradio:${{ github.sha }} \
           --region us-central1 \
           --platform managed \
           --allow-unauthenticated
